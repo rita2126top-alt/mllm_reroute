@@ -1,0 +1,67 @@
+name: Release environment CPU verification
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/release_environment_cpu.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installed-harness:
+    runs-on: ubuntu-latest
+    env:
+      CUDA_VISIBLE_DEVICES: ''
+      TOKENIZERS_PARALLELISM: 'false'
+      JUNIT_OUT: '/tmp/release_cpu_results.xml'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install original exact pins with CPU Torch substituted
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cpu
+          python - <<'PY'
+          from pathlib import Path
+          rows = []
+          for line in Path('requirements.txt').read_text().splitlines():
+              item = line.strip()
+              if not item or item.startswith(('#', '--', 'torch==', 'torchvision==')):
+                  continue
+              rows.append(item)
+          rows.extend(['torch==2.11.0', 'torchvision==0.26.0'])
+          Path('/tmp/cpu-pins.txt').write_text('\n'.join(rows)+'\n')
+          PY
+          python -m pip install -r /tmp/cpu-pins.txt 'pytest>=8.3,<9'
+          git clone --branch v0.7.1 --depth 1 https://github.com/EvolvingLMMs-Lab/lmms-eval.git external/lmms-eval
+          python -m pip install -c /tmp/cpu-pins.txt -e external/lmms-eval
+          python -m pip check
+      - name: Apply original task patches and validate actual harness imports
+        run: |
+          bash lmms_eval_patches/apply.sh
+          python -m cold_ghost.cli doctor --require-hf --require-lmms
+          python - <<'PY'
+          from lmms_eval.tasks import TaskManager
+          from lmms_eval.models import get_model
+          from cold_ghost.experiments import benchmark_names
+          required_tasks = benchmark_names()
+          manager = TaskManager()
+          available = set(manager.all_tasks)
+          assert set(required_tasks) <= available, set(required_tasks)-available
+          for name in ('llava_hf', 'qwen2_5_vl'):
+              print('Imported actual lmms model:', name, get_model(name))
+          print('All original benchmark tasks registered:', sorted(required_tasks))
+          PY
+      - name: Run complete CPU tests under release dependency pins
+        run: bash scripts/ghost/test_cpu.sh
+      - name: Record environment
+        if: always()
+        run: python -m pip freeze > /tmp/release_packages.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-cpu-environment-verification
+          path: |
+            /tmp/release_cpu_results.xml
+            /tmp/release_packages.txt
