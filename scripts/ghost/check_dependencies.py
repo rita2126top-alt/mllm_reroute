@@ -34,17 +34,17 @@ def main() -> int:
         path = Path(tmp) / 'check.avi'
         with av.open(str(path), 'w') as writer:
             stream = writer.add_stream('mpeg4', rate=2)
-            stream.width = stream.height = 16
+            stream.width = stream.height = 64
             stream.pix_fmt = 'yuv420p'
             for value in (40, 180):
-                frame = av.VideoFrame.from_ndarray(np.full((16, 16, 3), value, dtype=np.uint8), format='rgb24')
+                frame = av.VideoFrame.from_ndarray(np.full((64, 64, 3), value, dtype=np.uint8), format='rgb24')
                 for packet in stream.encode(frame):
                     writer.mux(packet)
             for packet in stream.encode():
                 writer.mux(packet)
         reader = decord.VideoReader(str(path), ctx=decord.cpu(0))
         frames = reader.get_batch([0, 1]).asnumpy()
-        if len(reader) != 2 or frames.shape != (2, 16, 16, 3):
+        if len(reader) != 2 or frames.shape != (2, 64, 64, 3):
             raise RuntimeError('Decord binary decode smoke failed')
         if float(frames[1].mean()) <= float(frames[0].mean()):
             raise RuntimeError('Decord decoded frames are not ordered correctly')
