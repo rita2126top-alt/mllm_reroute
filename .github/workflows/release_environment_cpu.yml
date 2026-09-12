@@ -2,7 +2,7 @@ name: Release environment CPU verification
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/release_environment_cpu.yml']
+    paths: ['.github/workflows/release_environment_cpu.yml', 'scripts/ghost/check_dependencies.py']
   workflow_dispatch:
 permissions:
   contents: read
@@ -55,9 +55,12 @@ jobs:
           PY
       - name: Run complete CPU tests under release dependency pins
         run: bash scripts/ghost/test_cpu.sh
-      - name: Record environment
+      - name: Record environment and source
         if: always()
-        run: python -m pip freeze > /tmp/release_packages.txt
+        run: |
+          python -m pip freeze > /tmp/release_packages.txt
+          git rev-parse HEAD > /tmp/release_source_commit.txt
+          git archive --format=zip --prefix=mllm_reroute/ HEAD > /tmp/mllm_reroute_source.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -65,3 +68,5 @@ jobs:
           path: |
             /tmp/release_cpu_results.xml
             /tmp/release_packages.txt
+            /tmp/release_source_commit.txt
+            /tmp/mllm_reroute_source.zip
