@@ -1,0 +1,52 @@
+name: Import original uploaded source
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/import_original.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import only into uninitialized repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -e models/patching.py; then
+            echo 'Original source is already present; no files changed.'
+            exit 0
+          fi
+          git clone --quiet https://github.com/elmma/mllm-reroute.git "$RUNNER_TEMP/reroute-source"
+          git -C "$RUNNER_TEMP/reroute-source" archive 9d422042076de678b2ad67c4a6660e4b97971a1e | tar -x -C "$GITHUB_WORKSPACE"
+          python - <<'PY'
+          import base64, hashlib, json
+          from pathlib import Path
+          # Additional scratch file in the user's uploaded ZIP, preserved byte-for-byte.
+          payload = 'aW1wb3J0IHRvcmNoDQppbXBvcnQgbnVtcHkgYXMgbnANCmltcG9ydCB0b3JjaC5ubiBhcyBubg0KZGVmIGFwcGx5cm9wZSh4LHBvc19pZHMpOg0KICAgIGJzeixuaGVhZCxzcWxlbixoZWFkZGltPXguc2hhcGUNCiAgICB0aGV0YT0xMDAwMCoqKC0yKnRvcmNoLmFycmFuZ2UoMCxoZWFkZGltLy8yLGRldmljZT14LmVkdmljZSkvaGVhZGRpbSkNCiAgICBmcmVxcz1wb3NfaWRzWy4uLiwgTm9uZV0qdGhldGFbTm9uZS5Ob25lLDpdDQogICAgY29zPXRvcmNoLmNvcyhmcmVxcykNCiAgICBzaW49dG9yY2guc2luKGZyZXFzKQ0KICAgIGNvcz1jb3NbOixOb25lLDosOl0NCiAgICBzaW49c2luWzosTm9uZSw6LDpdDQogICAgeDE9eFsuLi4sMDo6Ml0NCiAgICB4Mj14Wy4uLiwxOjoyXQ0KICAgIHhfcm90PXRvcmNoLmNhdChbeDEqY29zLXgyKnNpbix4MSpzaW4reDIqY29zXSxkaW09MSkNCiAgICByZXR1cm4geF9yb3QNCmNsYXNzIEdRQShubi5Nb2R1bGUpOg0KICAgIGRlZiBfaW5pdF8oc2VsZixoaWRkZW5fZGltLG51bV9xX2hlYWRzLG51bV9rdmdyb3Vwcyk6DQogICAgICAgIHN1cGVyKCkuX2luaXRfKCk6DQogICAgICAgIHNlbGYuaGlkZGVuX2RpbT1oaWRkZW5fZGltDQogICAgICAgIHNlbGYubnVtX3FfaGVhZHM9bnVtX3FfaGVhZHMNCiAgICAgICAgc2VsZi5udW1fa3Zncm91cHM9bnVtX2t2Z3JvdXBzDQogICAgICAgIHNlbGYucXBlcmdyb3VwPW51bV9xX2hlYWRzLy9udW1fa3Zncm91cHMNCiAgICAgICAgc2VsZi5oZWFkZGltPWhpZGRlbl9kaW0vL251bV9xX2hlYWRzDQogICAgICAgIHNlbGYud3E9bm4uTGluZWFyKGhpZGRlbl9kaW0sbnVtX3FfaGVhZHMqc2VsZi5oZWFkZGltLGJpYXM9RmFsc2UpDQogICAgICAgIHNlbGYud2s9bm4uTGluZWFyKGhpZGRlbl9kaW0sbnVtX2t2Z3JvdXBzKnNlbGYuaGVhZGRpbSxiaWFzPUZhbHNlKQ0KICAgICAgICBzZWxmLnd2PW5uLkxpbmVhcihoaWRkZW5fZGltLG51bV9rdmdyb3VwcypzZWxmLmhlYWRkaW0sYmlhcz1GYWxzZSkNCiAgICAgICAgc2VsZi53bz1ubi5MaW5lYXIobnVtX3FfaGVhZHMqc2VsZi5oZWFkZGltLGhpZGRlbl9kaW0sYmlhcz1GYWxzZSkNCiAgICAgICAgc2VsZi5jYWNoZV9rPU5vbmUNCiAgICAgICAgc2VsZi5jYWNoZV92PU5vbmUNCiAgICAgICAgZGVmIHJlc2V0X2NhY2hlKHNlbGYpOg0KICAgICAgICAgICAgc2VsZi5jYWNoZV9rPU5vbmUNCiAgICAgICAgICAgIHNlbGYuY2FjaGVfdj1Ob25lDQogICAgICAgIGRlZiBzcGxpdGhlYWRzcShzZWxmLHgpOg0KICAgICAgICAgICAgYnN6LHNlcSxfPXguc2hhcGUNCiAgICAgICAgICAgIHJldHVybiB4LnZpZXcoYnN6LHNlcSxzZWxmLm51bV9xX2hlYWRzLHNlbGYuaGVhZGRpbSkucGVybXV0ZSgwLDIsMSwzKQ0KICAgICAgICBkZWYgc3BsaXRoZWFkc2t2KHNlbGYseCk6DQogICAgICAgICAgICBic3osc2VxLF89eC5zaGFwZQ0KICAgICAgICAgICAgcmV0dXJuIHgudmlldyhic3osc2VxLHNlbGYubnVtX2t2Z3JvdXBzLHNlbGYuaGVhZGRpbSkucGVybXV0ZSgwLDIsMSwzKQ0KICAgICAgICBkZWYgZm9yd2FyZChzZWxmLHgscG9zX2lkcyxpc3ByZWZpbGwpOg0KICAgICAgICAgICAgYnN6LGN1cnNlcWxlbixfPXguc2hhcGUNCiAgICAgICAgICAgIHE9c2VsZi53cSh4KQ0KICAgICAgICAgICAgaz1zZWxmLndrKHgpDQogICAgICAgICAgICB2PXNlbGYud3YoeCkNCiAgICAgICAgICAgIHE9c3BsaXRoZWFkc3EocSkNCiAgICAgICAgICAgIGs9c3BsaXRoZWFkc2t2KGspDQogICAgICAgICAgICB2PXNwbGl0aGVhZHNrdih2KQ=='
+          Path('test.py').write_bytes(base64.b64decode(payload))
+          def obj(kind, data):
+              return hashlib.sha1(kind.encode()+b' '+str(len(data)).encode()+b'\0'+data).hexdigest()
+          def tree(path):
+              rows=[]
+              for p in path.iterdir():
+                  if p.name in ('.git', '.github'): continue
+                  directory=p.is_dir()
+                  sha=tree(p) if directory else obj('blob', p.read_bytes())
+                  mode='40000' if directory else '100644'
+                  rows.append((p.name+('/' if directory else ''), mode.encode()+b' '+p.name.encode()+b'\0'+bytes.fromhex(sha)))
+              return obj('tree', b''.join(row for _,row in sorted(rows)))
+          actual=tree(Path('.'))
+          assert actual == '6b5b6e82b6614df2c28668983b1043a21163cd03', actual
+          manifest={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in Path('.').rglob('*') if p.is_file() and '.git' not in p.parts and '.github' not in p.parts}
+          assert len(manifest)==79, len(manifest)
+          Path('.github/original-manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
+          print('Verified all 79 original uploaded files, including byte-identical scratch test.py.')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f -- .gitignore README.md bench_data configs experiments/.gitkeep lmms_eval_patches models profiler requirements.txt scripts test.py .github/original-manifest.json
+          git commit -m 'chore: import 79 byte-identical files from uploaded mllm-reroute source'
+          git push origin HEAD:main
