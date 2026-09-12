@@ -36,7 +36,7 @@ jobs:
           python -m pip install -r /tmp/cpu-pins.txt 'pytest>=8.3,<9'
           git clone --branch v0.7.1 --depth 1 https://github.com/EvolvingLMMs-Lab/lmms-eval.git external/lmms-eval
           python -m pip install -c /tmp/cpu-pins.txt -e external/lmms-eval
-          python -m pip check
+          python scripts/ghost/check_dependencies.py
       - name: Apply original task patches and validate actual harness imports
         run: |
           bash lmms_eval_patches/apply.sh
