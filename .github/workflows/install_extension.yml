@@ -1,0 +1,83 @@
+name: Install verified Cold Ghost source
+on:
+  push:
+    branches: [main]
+    paths: ['.github/delivery/READY.json']
+permissions:
+  contents: write
+jobs:
+  install-and-test:
+    runs-on: ubuntu-latest
+    env:
+      CUDA_VISIBLE_DEVICES: ''
+      TOKENIZERS_PARALLELISM: 'false'
+      JUNIT_OUT: '/tmp/cold_ghost_cpu_results.xml'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify archive and preserve all original files
+        run: |
+          python - <<'PY'
+          import base64, hashlib, io, json, lzma, pathlib, subprocess, tarfile
+          root = pathlib.Path.cwd()
+          meta = json.loads(pathlib.Path('.github/delivery/READY.json').read_text())
+          encoded = ''.join(pathlib.Path(f'.github/delivery/chunk{i:02d}.b64').read_text() for i in range(meta['chunks']))
+          packed = base64.b64decode(encoded, validate=True)
+          assert hashlib.sha256(packed).hexdigest() == meta['sha256'], 'archive checksum mismatch'
+          originals = json.loads(pathlib.Path('.github/original-manifest.json').read_text())
+          def verify_originals():
+              for name, expected in originals.items():
+                  assert hashlib.sha256(pathlib.Path(name).read_bytes()).hexdigest() == expected, name
+          verify_originals()
+          added = []
+          with tarfile.open(fileobj=io.BytesIO(lzma.decompress(packed)), mode='r:') as archive:
+              for entry in archive.getmembers():
+                  path = pathlib.Path(entry.name)
+                  assert entry.isfile() and not path.is_absolute() and '..' not in path.parts and '.git' not in path.parts, entry.name
+                  assert entry.name not in originals and entry.name != '.github/original-manifest.json', entry.name
+                  data = archive.extractfile(entry).read()
+                  if entry.name.startswith('.github/workflows/'):
+                      assert path.exists() and path.read_bytes() == data, 'workflows must be registered separately'
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_bytes(data)
+                  added.append(str(path))
+          assert len(added) == meta['file_count']
+          verify_originals()
+          pathlib.Path('.github/delivery/last_install.json').write_text(json.dumps({'archive_sha256': meta['sha256'], 'files': {p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in added}}, indent=2)+'\n')
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'add', '-f', '--', *added, '.github/delivery/last_install.json'], check=True)
+          subprocess.run(['git', 'commit', '-m', 'feat: add Cold/Ghost routing, two-stage training, experiments and CPU tests'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:main'], check=True)
+          print('Verified 79 unchanged originals and installed', len(added), 'added source files')
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install CPU architecture test environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch==2.11.0 torchvision==0.26.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install transformers==5.4.0 accelerate==1.13.0 hydra-core==1.3.2 'pytest>=8.3,<9' pillow
+      - name: Test real tiny LLaVA and Qwen architectures on CPU
+        run: |
+          git rev-parse HEAD
+          bash scripts/ghost/test_cpu.sh
+      - name: Environment report
+        if: always()
+        run: |
+          python -m pip freeze > /tmp/cold_ghost_cpu_packages.txt
+          python -m cold_ghost.cli doctor --require-hf > /tmp/cold_ghost_cpu_environment.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cold-ghost-first-cpu-verification
+          path: |
+            /tmp/cold_ghost_cpu_results.xml
+            /tmp/cold_ghost_cpu_packages.txt
+            /tmp/cold_ghost_cpu_environment.json
+      - name: Remove temporary delivery chunks
+        if: success()
+        run: |
+          git rm -- .github/delivery/chunk*.b64 .github/delivery/READY.json
+          git commit -m 'chore: remove temporary encoded source delivery files'
+          git push origin HEAD:main
