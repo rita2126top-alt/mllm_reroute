@@ -24,6 +24,20 @@ https://github.com/rita2126top-alt/mllm_reroute/actions/runs/34679103429
 
 这是实际实例化的随机小型 LLaVA 和 Qwen2.5-VL 架构，不是对 Hugging Face 接口做纯 mock，也不是下载并评测 7B 预训练权重。验证了多模态 prefill、KV cache、greedy generation、冻结骨干上的 Ghost 梯度传播及两种执行路径。原始 JUnit/环境记录保存在 `docs/validation/initial_native_cpu/`。
 
+### 2.3 最终完整依赖环境：41 项全部通过
+
+最终 Release CPU 工作流：
+
+https://github.com/rita2126top-alt/mllm_reroute/actions/runs/34680397115
+
+**整个工作流成功；41 passed，0 failed，0 errors，0 skipped。** JUnit 记录测试耗时 8.533 秒（不是安装耗时或 GPU 推理性能）。被验证的源码提交为 `f1f7f9f93283713b7f9f4b5cc07070b1f4849a3c`。此后的交付整理仅更新报告/证据、移除临时上传文件，不改变运行代码。
+
+这一轮不仅安装了模型依赖，还实际按原清单安装完整评测依赖、检出并可编辑安装 `lmms-eval v0.7.1`、应用原 RefCOCO 补丁、导入 `llava_hf` 和 `qwen2_5_vl` 适配器，并断言原全部 benchmark task 名称都已注册。随后重新运行完整测试集合。它证明安装、任务注册及 CPU 代码测试通过；**不等于已经下载真实 benchmark 并完成评测**。
+
+最终依赖环境采用 Python 3.10、PyTorch 2.11.0+cpu、torchvision 0.26.0+cpu、Transformers 5.4.0、Accelerate 1.13.0、Hydra 1.3.2、OmegaConf 2.3.0；CUDA wheels 仅为 CPU 验证而替换，原 `requirements.txt` 未修改。原始 JUnit、完整 pip freeze 和源码提交号保存在 `docs/validation/final_release_cpu/`。
+
+最终复检还确认：35 个新增 Python 文件语法通过、11 个 shell 脚本通过 `bash -n`、79 个原文件逐字节一致；727 行运行指南内的 43 个 Bash 代码块也逐一通过 shell 语法检查。
+
 ## 3. 已识别的原始文件问题
 
 上传 ZIP 的根目录 `test.py` 原本即有语法错误（第 7 行），并含未完成的 GQA 示例。按“原文件不变”的要求保留，没有隐藏这个错误。因此不能宣称“原始整个仓库零语法错误”。
@@ -34,7 +48,7 @@ https://github.com/rita2126top-alt/mllm_reroute/actions/runs/34679103429
 
 原始 requirements 中的 Decord 0.6.0 在新 pip 的 `pip check` 中报告平台 WHEEL 元数据不兼容。新增的 `scripts/ghost/check_dependencies.py` 不修改包、WHEEL 元数据或原始依赖文件，也不屏蔽一般依赖冲突。
 
-只有 Linux x86_64 上出现**唯一这一条**告警时，它才实际生成 64×64 的双帧 AVI，并用 Decord CPU 解码验证形状和帧顺序。任何额外版本冲突、导入失败或解码失败都会退出报错。不能把这个例外描述为“原生 pip check 无告警”。16×16 的极小视频触发过旧 Decord 的行对齐问题，测试素材已明确调整为 64×64。
+只有 Linux x86_64 上出现**唯一这一条**告警时，它才实际生成 64×64 的双帧 AVI，并用 Decord CPU 解码验证形状和帧顺序。任何额外版本冲突、导入失败或解码失败都会退出报错。不能把这个例外描述为“原生 pip check 无告警”。16×16 的极小视频触发过旧 Decord 的行对齐问题，测试素材已明确调整为 64×64，并在上述最终完整依赖工作流中实际解码通过。
 
 ## 5. 未执行和不保证的事项
 
