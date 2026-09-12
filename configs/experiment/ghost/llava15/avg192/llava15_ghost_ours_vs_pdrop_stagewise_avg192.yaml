@@ -1,0 +1,38 @@
+# @package _global_
+# Additive config. Original routing/model/eval settings are unchanged.
+defaults:
+- /eval: pope
+- /model: llava15_7b_hf
+- _self_
+routing:
+  method: pdrop
+  action: compact_route_stagewise
+  monotonic: false
+  drop_layers:
+  - 2
+  - 7
+  - 15
+  - 23
+  keep_ratios:
+  - 0.4502
+  - 0.4502
+  - 0.2251
+  - 0.1126
+eval:
+  batch_size: 1
+  log_samples: true
+ghost:
+  enabled: true
+  budget: 128
+  bottleneck_dim: 32
+  num_prototypes: 8
+  horizon_decisions: 1
+  max_skip_age: 8
+  block_share_span: 4
+  partition_at_decision_only: true
+  update_every_layer_in_stage: true
+  enable_after_last_decision: false
+  write_original_kv: false
+  epsilon: 1.0e-06
+  ablation: full
+  checkpoint: checkpoints/cold_ghost/llava15/avg192/ours_vs_pdrop/best.pt
