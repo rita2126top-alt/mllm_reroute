@@ -57,6 +57,41 @@ def validate(model, ctrl, records, prepare):
     return {k: v/len(records) for k, v in totals.items()}
 
 
+def accumulated_update(ctrl, rows, loss_fn, optimizer, scaler, *, context="", max_retries=16):
+    """AMP overflow recovery without silently dropping a training accumulation window."""
+    parameters = list(ctrl.bank.parameters())
+    for attempt in range(max_retries+1):
+        optimizer.zero_grad(set_to_none=True)
+        metrics = {k: 0.0 for k in ("delta", "direction", "reactivation", "freshness", "total")}
+        for micro, row in enumerate(rows):
+            try:
+                losses = loss_fn(row)
+                if not bool(torch.isfinite(losses["total"])):
+                    raise FloatingPointError("Non-finite forward loss; reducing AMP scale cannot fix it")
+                scaler.scale(losses["total"]/len(rows)).backward()
+            except Exception as exc:
+                raise RuntimeError(f"{context} micro={micro} sample_id={row.get('sample_id')} failed; no sample was silently skipped") from exc
+            for key, value in losses.items():
+                metrics[key] += float(value.detach())/len(rows)
+            clear_sample(ctrl)
+        scaler.unscale_(optimizer)
+        gradients = [p.grad for p in parameters if p.grad is not None]
+        finite = gradients and bool(torch.stack([g.isfinite().all() for g in gradients]).all())
+        if not finite:
+            if not scaler.is_enabled() or attempt == max_retries:
+                raise FloatingPointError(f"{context}: non-finite/missing gradients after {attempt} AMP retries; no optimizer update performed")
+            scale = scaler.get_scale()
+            scaler.update(new_scale=scale/2)
+            print(json.dumps(dict(event="amp_overflow_retry", context=context, attempt=attempt+1,
+                                  previous_scale=scale, new_scale=scaler.get_scale())), flush=True)
+            continue
+        norm = torch.nn.utils.clip_grad_norm_(parameters, 1.0, error_if_nonfinite=True)
+        scaler.step(optimizer)
+        scaler.update()
+        return metrics, norm, attempt
+    raise AssertionError("Unreachable AMP retry state")
+
+
 def train_loop(model, ctrl, train, val, prepare, out_dir, data_report, *, resume=None,
                warmup_updates=1000, rollout_updates=2000, accumulation=8,
                validation_every=100, debug=False):
@@ -101,25 +136,14 @@ def train_loop(model, ctrl, train, val, prepare, out_dir, data_report, *, resume
         if start > updates:
             raise ValueError("Resume step exceeds this phase's requested updates")
         for step in range(start, updates):
-            optimizer.zero_grad(set_to_none=True)
-            metrics = {k: 0.0 for k in ("delta", "direction", "reactivation", "freshness", "total")}
-            for micro in range(accumulation):
-                offset = step*accumulation+micro
-                row = train[order.at(offset)]
-                try:
-                    losses = sample_loss(model, ctrl, prepare(row), phase)
-                    scaler.scale(losses["total"]/accumulation).backward()
-                except Exception as exc:
-                    raise RuntimeError(f"{phase} step={step+1} micro={micro} sample_id={row.get('sample_id')} failed; no sample was silently skipped") from exc
-                for key, value in losses.items():
-                    metrics[key] += float(value.detach())/accumulation
-                clear_sample(ctrl)
-            scaler.unscale_(optimizer)
-            norm = torch.nn.utils.clip_grad_norm_(ctrl.bank.parameters(), 1.0, error_if_nonfinite=True)
-            scaler.step(optimizer)
-            scaler.update()
+            # Retry the SAME accumulation window if FP16 loss scaling overflows.
+            # A failed AMP step is never counted as a completed optimizer update.
+            rows = [train[order.at(step*accumulation+micro)] for micro in range(accumulation)]
+            metrics, norm, overflow_retries = accumulated_update(
+                ctrl, rows, lambda row: sample_loss(model, ctrl, prepare(row), phase), optimizer, scaler,
+                context=f"{phase} step={step+1}")
             completed = step+1
-            record = dict(phase=phase, update=completed, learning_rate=lr, grad_norm=float(norm), **metrics)
+            record = dict(phase=phase, update=completed, learning_rate=lr, grad_norm=float(norm), overflow_retries=overflow_retries, **metrics)
             if phase == "rollout" and (completed % validation_every == 0 or completed == updates):
                 validation = validate(model, ctrl, val, prepare)
                 record["validation"] = validation
